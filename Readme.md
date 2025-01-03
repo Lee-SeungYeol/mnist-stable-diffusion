@@ -1,8 +1,8 @@
 # Stable Diffusion을 이용한 이미지 생성 웹페이지 구성 프로젝트트
 
-![image_8](https://github.com/user-attachments/assets/28857d35-ebe4-4f0d-b128-f6d950ec0556)
+![readme](https://github.com/user-attachments/assets/1f6e864b-64c2-4e9d-b110-57c93ca1a396)
 
-## ✨ Skills
+<!-- ## ✨ Skills
 - **Programming Languages**: C
 - **Frameworks**: PyTorch, Visual Studio
 
@@ -29,7 +29,7 @@
 
 ## 🔗 Links
 - [Portfolio Website](#)
-<!-- - [LinkedIn](#)
+<!-- - [LinkedIn](#) -->
 - [Twitter](#) -->
 
 ---
