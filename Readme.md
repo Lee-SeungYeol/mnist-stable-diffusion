@@ -1,8 +1,6 @@
-# 째은 좀 잘한다!! 왜 안되지../?
-# Hello there! 👋
+# Stable Diffusion을 이용한 이미지 생성 웹페이지 구성 프로젝트트
 
-I'm a student learning coding. 🖥️          
-I enjoy learning new things about coding.
+![image_8](https://github.com/user-attachments/assets/28857d35-ebe4-4f0d-b128-f6d950ec0556)
 
 ## ✨ Skills
 - **Programming Languages**: C
