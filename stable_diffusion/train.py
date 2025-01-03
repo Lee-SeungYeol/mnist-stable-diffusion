@@ -19,8 +19,6 @@ from model_layer import Unet,Unet_Transformer
 transform = transforms.Compose([
     transforms.Resize((320,320)),
     transforms.RandomHorizontalFlip(),
-    
-    transforms.RandomRotation(90),
     transforms.RandomVerticalFlip(p=0.5),
 
     transforms.ToTensor(),
