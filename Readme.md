@@ -1,8 +1,10 @@
-# Stable Diffusion을 이용한 이미지 생성 웹페이지 구성 프로젝트트
+# Stable Diffusion을 이용한 이미지 생성 웹페이지 구성 프로젝트
 
 ![readme](https://github.com/user-attachments/assets/1f6e864b-64c2-4e9d-b110-57c93ca1a396)
 
 Bing에서 크롤링을 수행하여 데이터를 수집해 학습한 Stable Diffusion을 활용하여 이미지 생성해주는 웹페이지 구성 
+
+수행중,,,,,
 
 <!-- ## ✨ Skills
 - **Programming Languages**: C
@@ -32,7 +34,7 @@ Bing에서 크롤링을 수행하여 데이터를 수집해 학습한 Stable Dif
 ## 🔗 Links
 - [Portfolio Website](#)
 <!-- - [LinkedIn](#) -->
-- [Twitter](#) -->
+<!-- - [Twitter](#) --> -->
 
 ---
 <!-- **"Learning never exhausts the mind."** - Leonardo da Vinci -->
