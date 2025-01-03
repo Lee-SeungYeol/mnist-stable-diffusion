@@ -1,10 +1,10 @@
-# 째은 좀 잘한다!! 왜 안되지../?
-# Hello there! 👋
+# Stable Diffusion을 이용한 이미지 생성 웹페이지 구성 프로젝트트
 
-I'm a student learning coding. 🖥️          
-I enjoy learning new things about coding.
+![readme](https://github.com/user-attachments/assets/1f6e864b-64c2-4e9d-b110-57c93ca1a396)
 
-## ✨ Skills
+Bing에서 크롤링을 수행하여 데이터를 수집해 학습한 Stable Diffusion을 활용하여 이미지 생성해주는 웹페이지 구성 
+
+<!-- ## ✨ Skills
 - **Programming Languages**: C
 - **Frameworks**: PyTorch, Visual Studio
 
@@ -31,7 +31,7 @@ I enjoy learning new things about coding.
 
 ## 🔗 Links
 - [Portfolio Website](#)
-<!-- - [LinkedIn](#)
+<!-- - [LinkedIn](#) -->
 - [Twitter](#) -->
 
 ---
