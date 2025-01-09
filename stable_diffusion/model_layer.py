@@ -205,7 +205,7 @@ class SpatialTransformer(nn.Module):
 
 
 class Unet_Transformer(nn.Module):
-    def __init__(self,marginal_prob_std, channels=[32,64,128,256],embed_dim=256,text_dim=256, nClass=10):
+    def __init__(self,marginal_prob_std, channels=[128,128,256,256,256,512,512],embed_dim=256,text_dim=256, nClass=10):
         """
         marginal_prob_std: 시간 t에 대한 표준편차 반환 함수
         channels: 각 해상도의 특징 맵의 채널 수
@@ -229,23 +229,53 @@ class Unet_Transformer(nn.Module):
         self.conv3=nn.Conv2d(channels[1],channels[2],kernel_size=3,stride=2,bias=False)
         self.dense3=Dense(embed_dim,channels[2])
         self.gnorm3=nn.GroupNorm(32,channels[2])
-        self.attn3=SpatialTransformer(channels[2],text_dim) # 컨텍스트 정보, 텍스트 임베딩 차원을 공간 트랜스포머에 설정정
         
         self.conv4=nn.Conv2d(channels[2],channels[3],kernel_size=3,stride=2,bias=False)
         self.dense4=Dense(embed_dim,channels[3])
         self.gnorm4=nn.GroupNorm(32,num_channels=channels[3])
-        self.attn4=SpatialTransformer(channels[3],text_dim)
+
+
+        self.conv5=nn.Conv2d(channels[3],channels[4],kernel_size=3,stride=2,bias=False)
+        self.dense5=Dense(embed_dim,channels[4])
+        self.gnorm5=nn.GroupNorm(32,num_channels=channels[4])
+        self.attn5=SpatialTransformer(channels[4],text_dim)# 컨텍스트 정보, 텍스트 임베딩 차원을 공간 트랜스포머에 설정정
+
+        self.conv6=nn.Conv2d(channels[4],channels[5],kernel_size=3,stride=2,bias=False)
+        self.dense6=Dense(embed_dim,channels[5])
+        self.gnorm6=nn.GroupNorm(32,num_channels=channels[5])
+        self.attn6=SpatialTransformer(channels[5],text_dim)
+
+        self.conv7=nn.Conv2d(channels[5],channels[6],kernel_size=3,stride=2,bias=False)
+        self.dense7=Dense(embed_dim,channels[6])
+        self.gnorm7=nn.GroupNorm(32,num_channels=channels[6])
+        self.attn7=SpatialTransformer(channels[6],text_dim)
+
+
 
         # 디코딩 레이어 구현(해상도 증가)
+
+        self.tconv7=nn.ConvTranspose2d(channels[6],channels[5],kernel_size=3,stride=2,bias=False,output_padding=1)
+        self.dense8=Dense(embed_dim,channels[5])
+        self.tgnorm7=nn.GroupNorm(32,channels[5])
+
+        self.tconv6=nn.ConvTranspose2d(channels[5],channels[4],kernel_size=3,stride=2,bias=False,output_padding=1)
+        self.dense9=Dense(embed_dim,channels[4])
+        self.tgnorm6=nn.GroupNorm(32,channels[4])
+
+        self.tconv5=nn.ConvTranspose2d(channels[4],channels[3],kernel_size=3,stride=2,bias=False,output_padding=1)
+        self.dense10=Dense(embed_dim,channels[3])
+        self.tgnorm5=nn.GroupNorm(32,channels[3])
+
         self.tconv4=nn.ConvTranspose2d(channels[3],channels[2],kernel_size=3,stride=2,bias=False,output_padding=1)
-        self.dense5=Dense(embed_dim,channels[2])
+        self.dense11=Dense(embed_dim,channels[2])
+
         self.tgnorm4=nn.GroupNorm(32,channels[2])
         self.tconv3=nn.ConvTranspose2d(channels[2], channels[1],kernel_size=3,stride=2,bias=False,output_padding=1)
-        self.dense6=Dense(embed_dim,channels[1])
+        self.dense12=Dense(embed_dim,channels[1])
         self.tgnorm3=nn.GroupNorm(32,channels[1])
 
         self.tconv2=nn.ConvTranspose2d(channels[1],channels[0],kernel_size=3,stride=2,bias=False,output_padding=1)
-        self.dense7=Dense(embed_dim,channels[0])
+        self.dense13=Dense(embed_dim,channels[0])
         self.tgnorm2=nn.GroupNorm(32,channels[0])
         self.tconv1=nn.ConvTranspose2d(channels[0],3,kernel_size=3,stride=1)
 
@@ -278,26 +308,55 @@ class Unet_Transformer(nn.Module):
 
         h3=self.conv3(h2)+self.dense3(embed)
         h3=self.act(self.gnorm3(h3))
-        h3=self.attn3(h3,y_embed)
+        # h3=self.attn3(h3,y_embed)
         #print("h3: ",h3.shape)
 
         h4=self.conv4(h3)+self.dense4(embed)
         h4=self.act(self.gnorm4(h4))
-        h4=self.attn4(h4,y_embed)
+        # h4=self.attn4(h4,y_embed)
         #print("h4: ",h4.shape)
 
-        # 디코딩딩
+        h5=self.conv5(h4)+self.dense5(embed)
+        h5=self.act(self.gnorm5(h5))
+        h5=self.attn5(h5,y_embed)
+        #print("h5: ",h5.shape)
+
+        h6=self.conv6(h5)+self.dense6(embed)
+        h6=self.act(self.gnorm6(h6))
+        h6=self.attn6(h6,y_embed)
+        #print("h6: ",h6.shape)
+
+        # h7=self.conv7(h6)+self.dense7(embed)
+        # h7=self.act(self.gnorm7(h4))
+        # h7=self.attn5(h7,y_embed)
+        # print("h7: ",h7.shape)
+
+        # 디코딩
+        # h=self.tconv7(h7)
+        # h+=self.dense8(embed)
+        # h=self.act(self.tgnorm7(h))
+
+        h=self.tconv6(h6)
+        h+=self.dense9(embed)
+        h=self.act(self.tgnorm6(h))
+
+
+        h=self.tconv5(h5)
+        h+=self.dense10(embed)
+        h=self.act(self.tgnorm5(h))
+
+
         h=self.tconv4(h4)
-        h+=self.dense5(embed)
+        h+=self.dense11(embed)
         h=self.act(self.tgnorm4(h))
         #print("h: ",h.shape)
 
         h=self.tconv3(h+h3)
-        h+=self.dense6(embed)
+        h+=self.dense12(embed)
         h=self.act(self.tgnorm3(h))
 
         h=self.tconv2(h+h2)
-        h+=self.dense7(embed)
+        h+=self.dense13(embed)
         h=self.act(self.tgnorm2(h))
 
         h=self.tconv1(h+h1)
