@@ -1,127 +1,76 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 import math
-
 
 from einops import rearrange
 
-class Dense(nn.Module): #특징 계산 클래스
-    def __init__(self, input_dim, output_dim):# 입력 차원, 출려 차원
+class SinusoidalPositionEmbeddings(nn.Module):
+    def __init__(self, dim):
         super().__init__()
-        self.dense=nn.Linear(input_dim,output_dim)
+        self.dim=dim
 
-    def forward(self,x):
-        return self.dense(x)[...,None,None] # 마지막에 차원을 추가하여 4D 텐서로 변경
+    def forward(self,time):
+        device=time.device
+        half_dim=self.dim//2
+       
+        embeddings=math.log(10000)/(half_dim-1)
+        embeddings=torch.exp(torch.arange(half_dim,device=device)* -embeddings)
+        embeddings=time[:,None]*embeddings[None,:]
+        embeddings=torch.cat((embeddings.sin(),embeddings.cos()),dim=-1)
+        return embeddings
+
+class DiffusionModel:
+    def __init__(self,start_schedule=0.0001, end_scedule=0.02,timesteps=1000):
+        self.start_schedule=start_schedule
+        self.end_scedule=end_scedule
+        self.timesteps=timesteps
+
+        self.betas=torch.linspace(start_schedule,end_scedule,timesteps)
+        self.alphas=1-self.betas
+        self.alphas_cumprod=torch.cumprod(self.alphas,axis=0) #누적곱
+
+    def forward(self,x_0,t,device):
+
+        noise=torch.randn_like(x_0)
+        sqrt_alphas_cumprod_t=self.get_index_from_list(self.alphas_cumprod.sqrt(),t,x_0.shape)
+        sqrt_one_minus_alphas_cumprod_t=self.get_index_from_list(torch.sqrt(1.-self.alphas_cumprod),t,x_0.shape)
+
+        mean=sqrt_alphas_cumprod_t.to(device)*x_0.to(device)
+        variance=sqrt_one_minus_alphas_cumprod_t.to(device)*noise.to(device)
+
+        return mean+variance,noise.to(device)
     
+    def backward(self,x,t,model,labels):
+        betas_t=self.get_index_from_list(self.betas,t,x.shape)
+        sqrt_one_minus_alphas_comprod_t=self.get_index_from_list(torch.sqrt(1.-self.alphas_cumprod),t,x.shape)
+        sqrt_recip_alhas_t=self.get_index_from_list(torch.sqrt(1.0/self.alphas),t,x.shape)
 
-class GaussianFourierProJection(nn.Module):
-    def __init__(self,embed_dim,scale=30):
-        super().__init__()
-        self.W=nn.Parameter(torch.randn(embed_dim//2)*scale,requires_grad=False)
+        mean=sqrt_recip_alhas_t*(x-betas_t*model(x,t,labels)/sqrt_one_minus_alphas_comprod_t)
+        posterior_variance_t=betas_t
 
-    def forward(self,x):
-        x_proj=x[:,None]*self.W[None,:]*np.pi
-        return torch.cat([torch.sin(x_proj),torch.cos(x_proj)],dim=-1)
-
-
-class Unet(nn.Module):
-    def __init__(self,marginal_prob_std, channels=[32,64,128,256],embed_dim=256):
-        """
-        marginal_prob_std: 시간 t에 대한 표준편차 반환 함수
-        channels: 각 해상도의 특징 맵의 채널 수
-        embed_dim: 가우시안 랜덤 특징 임베딩 차원
-        """
-        super().__init__()
-
-        self.time_embed=nn.Sequential( # 시간에 대한 가우시안 랜덤 특징 임베딩 계층
-            GaussianFourierProJection(embed_dim=embed_dim),
-            nn.Linear(embed_dim,embed_dim)
-        )
-
-        # 인코딩 레이어 구현
-        self.conv1=nn.Conv2d(3,channels[0],kernel_size=3,stride=1,bias=False)# mnist여서 1채널
-        self.dense1=Dense(embed_dim,channels[0])
-        self.gnorm1=nn.GroupNorm(4,num_channels=channels[0]) # 그룹 정규화
-        self.conv2=nn.Conv2d(channels[0],channels[1],kernel_size=3,stride=2,bias=False)
-        self.dense2=Dense(embed_dim,channels[1])
-        self.gnorm2=nn.GroupNorm(32,num_channels=channels[1])
-
-        self.conv3=nn.Conv2d(channels[1],channels[2],kernel_size=3,stride=2,bias=False)
-        self.dense3=Dense(embed_dim,channels[2])
-        self.gnorm3=nn.GroupNorm(32,channels[2])
-        self.conv4=nn.Conv2d(channels[2],channels[3],kernel_size=3,stride=2,bias=False)
-        self.dense4=Dense(embed_dim,channels[3])
-        self.gnorm4=nn.GroupNorm(32,num_channels=channels[3])
-
-        # 디코딩 레이어 구현(해상도 증가)
-        self.tconv4=nn.ConvTranspose2d(channels[3],channels[2],kernel_size=3,stride=2,bias=False,output_padding=1)
-        self.dense5=Dense(embed_dim,channels[2])
-        self.tgnorm4=nn.GroupNorm(32,channels[2])
-        self.tconv3=nn.ConvTranspose2d(channels[2], channels[1],kernel_size=3,stride=2,bias=False,output_padding=1)
-        self.dense6=Dense(embed_dim,channels[1])
-        self.tgnorm3=nn.GroupNorm(32,channels[1])
-
-        self.tconv2=nn.ConvTranspose2d(channels[1],channels[0],kernel_size=3,stride=2,bias=False,output_padding=1)
-        self.dense7=Dense(embed_dim,channels[0])
-        self.tgnorm2=nn.GroupNorm(32,channels[0])
-        self.tconv1=nn.ConvTranspose2d(channels[0],3,kernel_size=3,stride=1)
-
-        # 스위시시 활성화 함수
-        self.act=lambda x:x*torch.sigmoid(x)
-        self.marginal_prob_std=marginal_prob_std
-
-    def forward(self,x,t,y=None):
-        """
-        x는 입력텐서
-        t는 시간 텐서
-        y는 타겟 텐서
-        h는 U-net을 통과한 출력텐서서
-        """
-        embed=self.act(self.time_embed(t))
-        
+        if t==0:
+            return mean
+        else:
+            noise=torch.randn_like(x)
+            variance=torch.sqrt(posterior_variance_t)*noise
+            return mean+variance
+    @staticmethod
+    def get_index_from_list(values,t,x_shape):
+        batch_size=t.shape[0]
         
 
-        #인코딩
-        h1=self.conv1(x)+self.dense1(embed)
-        h1=self.act(self.gnorm1(h1))
-        #print("h1: ",h1.shape)
+        result=values.gather(-1,t.cpu())
+       
+        """
+        batch_size=5
+        result: 5
+        len(x_shape)=4
         
+        """
 
-        h2=self.conv2(h1)+self.dense2(embed)
-        h2=self.act(self.gnorm2(h2))
-        #print("h2: ",h2.shape)
-
-        h3=self.conv3(h2)+self.dense3(embed)
-        h3=self.act(self.gnorm3(h3))
-        #print("h3: ",h3.shape)
-
-        h4=self.conv4(h3)+self.dense4(embed)
-        h4=self.act(self.gnorm4(h4))
-        #print("h4: ",h4.shape)
-
-        # 디코딩딩
-        h=self.tconv4(h4)
-        h+=self.dense5(embed)
-        h=self.act(self.tgnorm4(h))
-        #print("h: ",h.shape)
-
-        h=self.tconv3(h+h3)
-        h+=self.dense6(embed)
-        h=self.act(self.tgnorm3(h))
-
-        h=self.tconv2(h+h2)
-        h+=self.dense7(embed)
-        h=self.act(self.tgnorm2(h))
-
-        h=self.tconv1(h+h1)
-
-        h=h/self.marginal_prob_std(t)[:,None,None,None]
-
-        return h
+        return result.reshape(batch_size,*((1,)*(len(x_shape)-1))).to(t.device)
     
-
 class CrossAttention(nn.Module):
     def __init__(self,embed_dim,hidden_dim,context_dim=None, num_heads=1): #임베딩 차원, 은닉차원, 컨텍스트 차원(self attention이면 None), 어텐션 헤드 수
         super(CrossAttention,self).__init__()
@@ -153,17 +102,13 @@ class CrossAttention(nn.Module):
 
         
         # Compute score matrices, attention matrices, context vectors
+        
         scoremats=torch.einsum("BTH,BSH->BTS", Q, K)  # Q, K간 내적 계산. 스코어 행렬 획득
-        """    
-            Q: torch.Size([1024, 25, 128])
-            K: torch.Size([1024, 25, 128])
-            scoremats: torch.Size([1024, 25, 25])
-        """
+        
 
         attnmats = F.softmax(scoremats / math.sqrt(self.embed_dim), dim=-1) # 스코어 행렬의 softmax 계산
         ctx_vecs = torch.einsum("BTS,BSH->BTH", attnmats, V)  # 어텐션 행렬 적용된 V벡터 계산 
-        return ctx_vecs    
-    
+        return ctx_vecs
 class TransformerBlock(nn.Module):
     def __init__(self, hidden_dim, context_dim):
         super(TransformerBlock, self).__init__()
@@ -175,6 +120,9 @@ class TransformerBlock(nn.Module):
         self.norm2=nn.LayerNorm(hidden_dim)
         self.norm3=nn.LayerNorm(hidden_dim)
 
+        self.hidden_dim=hidden_dim
+        self.context_dim=context_dim
+
         self.ffn=nn.Sequential(
             nn.Linear(hidden_dim,3*hidden_dim),
             nn.GELU(),
@@ -183,11 +131,13 @@ class TransformerBlock(nn.Module):
 
     def forward(self,x,context=None):
         x=self.attn_self(self.norm1(x))+x
+
+        
         x=self.attn_cross(self.norm2(x),context=context)+x
+        
         x=self.ffn(self.norm3(x))+x
 
         return x
-    
 class SpatialTransformer(nn.Module):
     def __init__(self,hidden_dim,context_dim):
         super(SpatialTransformer,self).__init__()
@@ -196,171 +146,100 @@ class SpatialTransformer(nn.Module):
     def forward(self,x,context=None): # x: 입력텐서 [배치, 채널, 높이, 너비], context: 컨택스트 텐서[배치, 컨텍스트 시퀀스 크기, 컨텍스트 차원]
         b,c,h,w=x.shape
         x_in=x
+        
 
         x=rearrange(x, "b c h w -> b (h w) c") # 입력텐서 재배열
+
         x=self.transformer(x,context)
+        
         x=rearrange(x, "b (h w) c -> b c h w", h=h, w=w)
 
         return x+x_in
+    
 
-
-class Unet_Transformer(nn.Module):
-    def __init__(self,marginal_prob_std, channels=[128,128,256,256,256,512,512],embed_dim=256,text_dim=256, nClass=10):
-        """
-        marginal_prob_std: 시간 t에 대한 표준편차 반환 함수
-        channels: 각 해상도의 특징 맵의 채널 수
-        embed_dim: 가우시안 랜덤 특징 임베딩 차원
-        """
+class Block(nn.Module):
+    def __init__(self, channels_in, channels_out, time_embedding_dims, labels, num_filters = 3, downsample=True,text_dim=128):
         super().__init__()
 
-        self.time_embed=nn.Sequential( # 시간에 대한 가우시안 랜덤 특징 임베딩 계층
-            GaussianFourierProJection(embed_dim=embed_dim),
-            nn.Linear(embed_dim,embed_dim)
-        )
-
-        # 인코딩 레이어 구현
-        self.conv1=nn.Conv2d(3,channels[0],kernel_size=3,stride=1,bias=False)# mnist여서 1채널
-        self.dense1=Dense(embed_dim,channels[0])
-        self.gnorm1=nn.GroupNorm(4,num_channels=channels[0]) # 그룹 정규화
-        self.conv2=nn.Conv2d(channels[0],channels[1],kernel_size=3,stride=2,bias=False)
-        self.dense2=Dense(embed_dim,channels[1])
-        self.gnorm2=nn.GroupNorm(32,num_channels=channels[1])
-
-        self.conv3=nn.Conv2d(channels[1],channels[2],kernel_size=3,stride=2,bias=False)
-        self.dense3=Dense(embed_dim,channels[2])
-        self.gnorm3=nn.GroupNorm(32,channels[2])
-        
-        self.conv4=nn.Conv2d(channels[2],channels[3],kernel_size=3,stride=2,bias=False)
-        self.dense4=Dense(embed_dim,channels[3])
-        self.gnorm4=nn.GroupNorm(32,num_channels=channels[3])
-
-
-        self.conv5=nn.Conv2d(channels[3],channels[4],kernel_size=3,stride=2,bias=False)
-        self.dense5=Dense(embed_dim,channels[4])
-        self.gnorm5=nn.GroupNorm(32,num_channels=channels[4])
-        self.attn5=SpatialTransformer(channels[4],text_dim)# 컨텍스트 정보, 텍스트 임베딩 차원을 공간 트랜스포머에 설정정
-
-        self.conv6=nn.Conv2d(channels[4],channels[5],kernel_size=3,stride=2,bias=False)
-        self.dense6=Dense(embed_dim,channels[5])
-        self.gnorm6=nn.GroupNorm(32,num_channels=channels[5])
-        self.attn6=SpatialTransformer(channels[5],text_dim)
-
-        self.conv7=nn.Conv2d(channels[5],channels[6],kernel_size=3,stride=2,bias=False)
-        self.dense7=Dense(embed_dim,channels[6])
-        self.gnorm7=nn.GroupNorm(32,num_channels=channels[6])
-        self.attn7=SpatialTransformer(channels[6],text_dim)
-
-
-
-        # 디코딩 레이어 구현(해상도 증가)
-
-        self.tconv7=nn.ConvTranspose2d(channels[6],channels[5],kernel_size=3,stride=2,bias=False,output_padding=1)
-        self.dense8=Dense(embed_dim,channels[5])
-        self.tgnorm7=nn.GroupNorm(32,channels[5])
-
-        self.tconv6=nn.ConvTranspose2d(channels[5],channels[4],kernel_size=3,stride=2,bias=False,output_padding=1)
-        self.dense9=Dense(embed_dim,channels[4])
-        self.tgnorm6=nn.GroupNorm(32,channels[4])
-
-        self.tconv5=nn.ConvTranspose2d(channels[4],channels[3],kernel_size=3,stride=2,bias=False,output_padding=1)
-        self.dense10=Dense(embed_dim,channels[3])
-        self.tgnorm5=nn.GroupNorm(32,channels[3])
-
-        self.tconv4=nn.ConvTranspose2d(channels[3],channels[2],kernel_size=3,stride=2,bias=False,output_padding=1)
-        self.dense11=Dense(embed_dim,channels[2])
-
-        self.tgnorm4=nn.GroupNorm(32,channels[2])
-        self.tconv3=nn.ConvTranspose2d(channels[2], channels[1],kernel_size=3,stride=2,bias=False,output_padding=1)
-        self.dense12=Dense(embed_dim,channels[1])
-        self.tgnorm3=nn.GroupNorm(32,channels[1])
-
-        self.tconv2=nn.ConvTranspose2d(channels[1],channels[0],kernel_size=3,stride=2,bias=False,output_padding=1)
-        self.dense13=Dense(embed_dim,channels[0])
-        self.tgnorm2=nn.GroupNorm(32,channels[0])
-        self.tconv1=nn.ConvTranspose2d(channels[0],3,kernel_size=3,stride=1)
-
-        # 스위시시 활성화 함수
-        self.act=lambda x:x*torch.sigmoid(x)
-        self.marginal_prob_std=marginal_prob_std
-        self.cond_embed=nn.Embedding(nClass,text_dim)
-
-    def forward(self,x,t,y=None):
-        """
-        x는 입력텐서
-        t는 시간 텐서
-        y는 타겟 텐서
-        h는 U-net을 통과한 출력텐서서
-        """
-        embed=self.act(self.time_embed(t))
-        y_embed=self.cond_embed(y).unsqueeze(1)
-        
+        self.time_embedding_dims = time_embedding_dims
+        self.time_embedding = SinusoidalPositionEmbeddings(time_embedding_dims)
+        self.labels = labels
         
 
-        #인코딩
-        h1=self.conv1(x)+self.dense1(embed)
-        h1=self.act(self.gnorm1(h1))
-        #print("h1: ",h1.shape)
+        self.downsample = downsample
+        self.channels_out=channels_out
+
+        if downsample:
+            self.conv1 = nn.Conv2d(channels_in, channels_out, num_filters, padding=1)
+            self.final = nn.Conv2d(channels_out, channels_out, 4, 2, 1)
+        else:
+            self.conv1 = nn.Conv2d(2 * channels_in, channels_out, num_filters, padding=1)
+            self.final = nn.ConvTranspose2d(channels_out, channels_out, 4, 2, 1)
+
+        self.bnorm1 = nn.BatchNorm2d(channels_out)
+        self.bnorm2 = nn.BatchNorm2d(channels_out)
+
+        self.conv2 = nn.Conv2d(channels_out, channels_out, 3, padding=1)
+        self.time_mlp = nn.Linear(time_embedding_dims, channels_out)
+        self.relu = nn.ReLU()
+        self.attn=SpatialTransformer(channels_out,text_dim)
+
+    def forward(self, x, t, y_embed):
+        o = self.bnorm1(self.relu(self.conv1(x)))
+        o_time = self.relu(self.time_mlp(self.time_embedding(t)))
+        o = o + o_time[(..., ) + (None, ) * 2]
+
+        o = self.bnorm2(self.relu(self.conv2(o)))
         
+        if self.channels_out==1024 or self.channels_out==512:
+            o=self.attn(o,y_embed)
 
-        h2=self.conv2(h1)+self.dense2(embed)
-        h2=self.act(self.gnorm2(h2))
-        #print("h2: ",h2.shape)
+        return self.final(o)
+    
 
-        h3=self.conv3(h2)+self.dense3(embed)
-        h3=self.act(self.gnorm3(h3))
-        # h3=self.attn3(h3,y_embed)
-        #print("h3: ",h3.shape)
+    class UNet_Transformer(nn.Module):
+        def __init__(self, 
+                    img_channels=3,
+                    time_embedding_dims=128,
+                    labels=False,
+                    sequence_channels=(64, 128, 256, 512, 1024),
+                    ):
+            super().__init__()
+            self.time_embedding_dims = time_embedding_dims
+            sequence_channels_rev = reversed(sequence_channels)
 
-        h4=self.conv4(h3)+self.dense4(embed)
-        h4=self.act(self.gnorm4(h4))
-        # h4=self.attn4(h4,y_embed)
-        #print("h4: ",h4.shape)
+            # Downsampling path
+            self.downsampling = nn.ModuleList([
+                Block(channels_in, channels_out, time_embedding_dims, labels) 
+                for channels_in, channels_out in zip(sequence_channels, sequence_channels[1:])
+            ])
 
-        h5=self.conv5(h4)+self.dense5(embed)
-        h5=self.act(self.gnorm5(h5))
-        h5=self.attn5(h5,y_embed)
-        #print("h5: ",h5.shape)
+            # Upsampling path 
+            self.upsampling = nn.ModuleList([
+                Block(channels_in, channels_out, time_embedding_dims, labels, downsample=False)
+                for channels_in, channels_out in zip(sequence_channels[::-1], sequence_channels[::-1][1:])
+            ])
 
-        h6=self.conv6(h5)+self.dense6(embed)
-        h6=self.act(self.gnorm6(h6))
-        h6=self.attn6(h6,y_embed)
-        #print("h6: ",h6.shape)
+            # Input and output convolutions
+            self.conv1 = nn.Conv2d(img_channels, sequence_channels[0], kernel_size=3, padding=1)
+            self.conv2 = nn.Conv2d(sequence_channels[0], img_channels, kernel_size=1)
+            self.cond_embed=nn.Embedding(10,128)
+        def forward(self, x, t, y):
+            # Store residual connections
+            residuals = []
+            
+            y_embed=self.cond_embed(y).unsqueeze(1)
+            #print(y_embed.shape)#torch.Size([8, 128])
+            # Initial convolution
+            o = self.conv1(x)
 
-        # h7=self.conv7(h6)+self.dense7(embed)
-        # h7=self.act(self.gnorm7(h4))
-        # h7=self.attn5(h7,y_embed)
-        # print("h7: ",h7.shape)
+            # Downsampling
+            for down_block in self.downsampling:
+                o = down_block(o, t, y_embed)
+                residuals.append(o)
 
-        # 디코딩
-        # h=self.tconv7(h7)
-        # h+=self.dense8(embed)
-        # h=self.act(self.tgnorm7(h))
+            # Upsampling with skip connections
+            for up_block, residual in zip(self.upsampling, reversed(residuals)):
+                o = up_block(torch.cat((o, residual), dim=1), t, y_embed)
 
-        h=self.tconv6(h6)
-        h+=self.dense9(embed)
-        h=self.act(self.tgnorm6(h))
-
-
-        h=self.tconv5(h5)
-        h+=self.dense10(embed)
-        h=self.act(self.tgnorm5(h))
-
-
-        h=self.tconv4(h4)
-        h+=self.dense11(embed)
-        h=self.act(self.tgnorm4(h))
-        #print("h: ",h.shape)
-
-        h=self.tconv3(h+h3)
-        h+=self.dense12(embed)
-        h=self.act(self.tgnorm3(h))
-
-        h=self.tconv2(h+h2)
-        h+=self.dense13(embed)
-        h=self.act(self.tgnorm2(h))
-
-        h=self.tconv1(h+h1)
-
-        h=h/self.marginal_prob_std(t)[:,None,None,None]
-
-        return h
+            return self.conv2(o)
