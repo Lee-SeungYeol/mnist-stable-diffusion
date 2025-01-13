@@ -1,8 +1,8 @@
-# Stable Diffusion을 이용한 이미지 생성 웹페이지 구성 프로젝트
+#Diffusion을 이용한 이미지 생성 웹페이지 구성 프로젝트
 
 ![readme](https://github.com/user-attachments/assets/1f6e864b-64c2-4e9d-b110-57c93ca1a396)
 
-Bing에서 크롤링을 수행하여 데이터를 수집해 학습한 Stable Diffusion을 활용하여 이미지 생성해주는 웹페이지 구성 
+Bing에서 크롤링을 수행하여 데이터를 수집해 학습한 Diffusion을 활용하여 이미지 생성해주는 웹페이지 구성 
 
 수행중,,,,,
 
